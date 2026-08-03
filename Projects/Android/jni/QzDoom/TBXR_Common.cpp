@@ -4,6 +4,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <dlfcn.h>
 #include <sys/prctl.h>					// for prctl( PR_SET_NAME )
 #include <android/log.h>
 #include <android/native_window_jni.h>	// for native window JNI
@@ -60,79 +61,154 @@ float SS_MULTIPLIER    = 0.0f;
 
 GLboolean stageSupported = GL_FALSE;
 
+PFN_xrGetInstanceProcAddr xrGetInstanceProcAddr = NULL;
+PFN_xrInitializeLoaderKHR xrInitializeLoaderKHR = NULL;
+PFN_xrEnumerateInstanceExtensionProperties xrEnumerateInstanceExtensionProperties = NULL;
+PFN_xrCreateInstance xrCreateInstance = NULL;
+PFN_xrResultToString xrResultToString = NULL;
+PFN_xrGetInstanceProperties xrGetInstanceProperties = NULL;
+PFN_xrGetSystem xrGetSystem = NULL;
+PFN_xrGetSystemProperties xrGetSystemProperties = NULL;
+PFN_xrGetViewConfigurationProperties xrGetViewConfigurationProperties = NULL;
+PFN_xrEnumerateViewConfigurations xrEnumerateViewConfigurations = NULL;
+PFN_xrEnumerateViewConfigurationViews xrEnumerateViewConfigurationViews = NULL;
+PFN_xrCreateSession xrCreateSession = NULL;
+PFN_xrDestroySession xrDestroySession = NULL;
+PFN_xrBeginSession xrBeginSession = NULL;
+PFN_xrEndSession xrEndSession = NULL;
+PFN_xrPollEvent xrPollEvent = NULL;
+PFN_xrCreateReferenceSpace xrCreateReferenceSpace = NULL;
+PFN_xrDestroySpace xrDestroySpace = NULL;
+PFN_xrEnumerateReferenceSpaces xrEnumerateReferenceSpaces = NULL;
+PFN_xrGetReferenceSpaceBoundsRect xrGetReferenceSpaceBoundsRect = NULL;
+PFN_xrLocateSpace xrLocateSpace = NULL;
+PFN_xrLocateViews xrLocateViews = NULL;
+PFN_xrCreateSwapchain xrCreateSwapchain = NULL;
+PFN_xrDestroySwapchain xrDestroySwapchain = NULL;
+PFN_xrEnumerateSwapchainImages xrEnumerateSwapchainImages = NULL;
+PFN_xrAcquireSwapchainImage xrAcquireSwapchainImage = NULL;
+PFN_xrWaitSwapchainImage xrWaitSwapchainImage = NULL;
+PFN_xrReleaseSwapchainImage xrReleaseSwapchainImage = NULL;
+PFN_xrWaitFrame xrWaitFrame = NULL;
+PFN_xrBeginFrame xrBeginFrame = NULL;
+PFN_xrEndFrame xrEndFrame = NULL;
+PFN_xrCreateActionSet xrCreateActionSet = NULL;
+PFN_xrCreateAction xrCreateAction = NULL;
+PFN_xrStringToPath xrStringToPath = NULL;
+PFN_xrSuggestInteractionProfileBindings xrSuggestInteractionProfileBindings = NULL;
+PFN_xrCreateActionSpace xrCreateActionSpace = NULL;
+PFN_xrAttachSessionActionSets xrAttachSessionActionSets = NULL;
+PFN_xrSyncActions xrSyncActions = NULL;
+PFN_xrGetActionStateBoolean xrGetActionStateBoolean = NULL;
+PFN_xrGetActionStateFloat xrGetActionStateFloat = NULL;
+PFN_xrGetActionStateVector2f xrGetActionStateVector2f = NULL;
+PFN_xrApplyHapticFeedback xrApplyHapticFeedback = NULL;
+PFN_xrStopHapticFeedback xrStopHapticFeedback = NULL;
+
+static void* OpenXRLoaderHandle = NULL;
+
+static void TBXR_LoadOpenXRFunction(XrInstance instance, const char* name, PFN_xrVoidFunction* function)
+{
+	XrResult result = xrGetInstanceProcAddr(instance, name, function);
+	if (XR_FAILED(result) || *function == NULL)
+	{
+		ALOGE("Failed to load OpenXR function %s: %d", name, result);
+		exit(1);
+	}
+}
+
+#define LOAD_XR_FUNCTION(instance, name) \
+	TBXR_LoadOpenXRFunction(instance, #name, (PFN_xrVoidFunction*)&name)
+
+static void TBXR_LoadOpenXRLoader()
+{
+	if (OpenXRLoaderHandle != NULL)
+	{
+		return;
+	}
+
+	OpenXRLoaderHandle = dlopen("libopenxr_loader.so", RTLD_NOW | RTLD_LOCAL);
+	if (OpenXRLoaderHandle == NULL)
+	{
+		ALOGE("Failed to load libopenxr_loader.so: %s", dlerror());
+		exit(1);
+	}
+
+	xrGetInstanceProcAddr = (PFN_xrGetInstanceProcAddr)dlsym(OpenXRLoaderHandle, "xrGetInstanceProcAddr");
+	if (xrGetInstanceProcAddr == NULL)
+	{
+		ALOGE("Failed to load xrGetInstanceProcAddr: %s", dlerror());
+		exit(1);
+	}
+
+	LOAD_XR_FUNCTION(XR_NULL_HANDLE, xrEnumerateInstanceExtensionProperties);
+	LOAD_XR_FUNCTION(XR_NULL_HANDLE, xrCreateInstance);
+
+	XrResult result = xrGetInstanceProcAddr(
+			XR_NULL_HANDLE, "xrInitializeLoaderKHR", (PFN_xrVoidFunction*)&xrInitializeLoaderKHR);
+	if (XR_FAILED(result))
+	{
+		xrInitializeLoaderKHR = NULL;
+	}
+}
+
+static void TBXR_LoadOpenXRInstanceFunctions(XrInstance instance)
+{
+	LOAD_XR_FUNCTION(instance, xrResultToString);
+	LOAD_XR_FUNCTION(instance, xrGetInstanceProperties);
+	LOAD_XR_FUNCTION(instance, xrGetSystem);
+	LOAD_XR_FUNCTION(instance, xrGetSystemProperties);
+	LOAD_XR_FUNCTION(instance, xrGetViewConfigurationProperties);
+	LOAD_XR_FUNCTION(instance, xrEnumerateViewConfigurations);
+	LOAD_XR_FUNCTION(instance, xrEnumerateViewConfigurationViews);
+	LOAD_XR_FUNCTION(instance, xrCreateSession);
+	LOAD_XR_FUNCTION(instance, xrDestroySession);
+	LOAD_XR_FUNCTION(instance, xrBeginSession);
+	LOAD_XR_FUNCTION(instance, xrEndSession);
+	LOAD_XR_FUNCTION(instance, xrPollEvent);
+	LOAD_XR_FUNCTION(instance, xrCreateReferenceSpace);
+	LOAD_XR_FUNCTION(instance, xrDestroySpace);
+	LOAD_XR_FUNCTION(instance, xrEnumerateReferenceSpaces);
+	LOAD_XR_FUNCTION(instance, xrGetReferenceSpaceBoundsRect);
+	LOAD_XR_FUNCTION(instance, xrLocateSpace);
+	LOAD_XR_FUNCTION(instance, xrLocateViews);
+	LOAD_XR_FUNCTION(instance, xrCreateSwapchain);
+	LOAD_XR_FUNCTION(instance, xrDestroySwapchain);
+	LOAD_XR_FUNCTION(instance, xrEnumerateSwapchainImages);
+	LOAD_XR_FUNCTION(instance, xrAcquireSwapchainImage);
+	LOAD_XR_FUNCTION(instance, xrWaitSwapchainImage);
+	LOAD_XR_FUNCTION(instance, xrReleaseSwapchainImage);
+	LOAD_XR_FUNCTION(instance, xrWaitFrame);
+	LOAD_XR_FUNCTION(instance, xrBeginFrame);
+	LOAD_XR_FUNCTION(instance, xrEndFrame);
+	LOAD_XR_FUNCTION(instance, xrCreateActionSet);
+	LOAD_XR_FUNCTION(instance, xrCreateAction);
+	LOAD_XR_FUNCTION(instance, xrStringToPath);
+	LOAD_XR_FUNCTION(instance, xrSuggestInteractionProfileBindings);
+	LOAD_XR_FUNCTION(instance, xrCreateActionSpace);
+	LOAD_XR_FUNCTION(instance, xrAttachSessionActionSets);
+	LOAD_XR_FUNCTION(instance, xrSyncActions);
+	LOAD_XR_FUNCTION(instance, xrGetActionStateBoolean);
+	LOAD_XR_FUNCTION(instance, xrGetActionStateFloat);
+	LOAD_XR_FUNCTION(instance, xrGetActionStateVector2f);
+	LOAD_XR_FUNCTION(instance, xrApplyHapticFeedback);
+	LOAD_XR_FUNCTION(instance, xrStopHapticFeedback);
+}
+
 const char* const requiredExtensionNames[] = {
 		XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME,
 		XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME};
 
+#define XR_BD_CONTROLLER_INTERACTION_EXTENSION_NAME "XR_BD_controller_interaction"
 #define XR_PICO_CONFIGS_EXT_EXTENSION_NAME "XR_PICO_configs_ext"
-
-const char* const optionalExtensionNames[] = {
-		XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME,
-		XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME,
-		XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME,
-		XR_FB_COLOR_SPACE_EXTENSION_NAME,
-		XR_PICO_CONFIGS_EXT_EXTENSION_NAME};
-
-enum ConfigsEXT
-{
-    RENDER_TEXTURE_WIDTH = 0,
-    RENDER_TEXTURE_HEIGHT,
-    SHOW_FPS,
-    RUNTIME_LOG_LEVEL,
-    PXRPLUGIN_LOG_LEVEL,
-    UNITY_LOG_LEVEL,
-    UNREAL_LOG_LEVEL,
-    NATIVE_LOG_LEVEL,
-    TARGET_FRAME_RATE,
-    NECK_MODEL_X,
-    NECK_MODEL_Y,
-    NECK_MODEL_Z,
-    DISPLAY_REFRESH_RATE,
-    ENABLE_6DOF,
-    CONTROLLER_TYPE,
-    PHYSICAL_IPD,
-    TO_DELTA_SENSOR_Y,
-    GET_DISPLAY_RATE,
-    FOVEATION_SUBSAMPLED_ENABLED = 18,
-    TRACKING_ORIGIN_HEIGHT
-};
-typedef XrResult (XRAPI_PTR *PFN_xrGetConfigPICO)(
-        XrSession                              session,
-        enum ConfigsEXT                        configIndex,
-        float *                                configData);
-PFN_xrGetConfigPICO    pfnXrGetConfigPICO;
-
-
-enum ConfigsSetEXT
-{
-	UNREAL_VERSION = 0,
-	TRACKING_ORIGIN,
-	OPENGL_NOERROR,
-	ENABLE_SIX_DOF,
-	PRESENTATION_FLAG,
-	ENABLE_CPT,
-	PLATFORM,
-	FOVEATION_LEVEL,
-	SET_DISPLAY_RATE = 8,
-	MRC_TEXTURE_ID = 9,
-};
-
-typedef XrResult (XRAPI_PTR *PFN_xrSetConfigPICO) (
-		XrSession                             session,
-		enum ConfigsSetEXT                    configIndex,
-		char *                                configData);
-PFN_xrSetConfigPICO    pfnXrSetConfigPICO;
 
 const uint32_t numRequiredExtensions =
 		sizeof(requiredExtensionNames) / sizeof(requiredExtensionNames[0]);
-const uint32_t numOptionalExtensions =
-		sizeof(optionalExtensionNames) / sizeof(optionalExtensionNames[0]);
 
 static bool openXrExtPerformanceSettings = false;
 static bool openXrExtAndroidThreadSettings = false;
 static bool openXrExtFBDisplayRefreshRate = false;
 static bool openXrExtFBColorSpace = false;
-static bool openXrExtPicoConfigs = false;
 
 static bool TBXR_StringContainsNoCase(const char* haystack, const char* needle)
 {
@@ -193,10 +269,35 @@ static void TBXR_SetOptionalExtensionFlag(const char* extensionName)
 	{
 		openXrExtFBColorSpace = true;
 	}
-	else if (strcmp(extensionName, XR_PICO_CONFIGS_EXT_EXTENSION_NAME) == 0)
+}
+
+static bool TBXR_AddExtensionIfAvailable(
+		const XrExtensionProperties* supportedExtensions,
+		uint32_t supportedExtensionCount,
+		const char* extensionName,
+		const char** enabledExtensionNames,
+		uint32_t* enabledExtensionCount,
+		uint32_t maxEnabledExtensions)
+{
+	if (!TBXR_ExtensionIsSupported(extensionName, supportedExtensions, supportedExtensionCount))
 	{
-		openXrExtPicoConfigs = true;
+		ALOGV("OpenXR extension not available: %s", extensionName);
+		return false;
 	}
+
+	if (*enabledExtensionCount < maxEnabledExtensions)
+	{
+		enabledExtensionNames[(*enabledExtensionCount)++] = extensionName;
+		TBXR_SetOptionalExtensionFlag(extensionName);
+		ALOGV("Enabling OpenXR extension: %s", extensionName);
+	}
+	else
+	{
+		ALOGE("OpenXR extension list capacity exceeded while adding: %s", extensionName);
+		exit(1);
+	}
+
+	return true;
 }
 
 static uint32_t TBXR_BuildEnabledExtensionList(const char** enabledExtensionNames, uint32_t maxEnabledExtensions)
@@ -247,19 +348,35 @@ static uint32_t TBXR_BuildEnabledExtensionList(const char** enabledExtensionName
 	openXrExtAndroidThreadSettings = false;
 	openXrExtFBDisplayRefreshRate = false;
 	openXrExtFBColorSpace = false;
-	openXrExtPicoConfigs = false;
 
-	for (uint32_t i = 0; i < numOptionalExtensions; i++)
+	TBXR_AddExtensionIfAvailable(
+			supportedExtensions, supportedExtensionCount,
+			XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME,
+			enabledExtensionNames, &enabledExtensionCount, maxEnabledExtensions);
+
+	bool picoRuntime = TBXR_AddExtensionIfAvailable(
+			supportedExtensions, supportedExtensionCount,
+			XR_PICO_CONFIGS_EXT_EXTENSION_NAME,
+			enabledExtensionNames, &enabledExtensionCount, maxEnabledExtensions);
+	TBXR_AddExtensionIfAvailable(
+			supportedExtensions, supportedExtensionCount,
+			XR_BD_CONTROLLER_INTERACTION_EXTENSION_NAME,
+			enabledExtensionNames, &enabledExtensionCount, maxEnabledExtensions);
+
+	if (!picoRuntime)
 	{
-		const char* extensionName = optionalExtensionNames[i];
-		if (TBXR_ExtensionIsSupported(extensionName, supportedExtensions, supportedExtensionCount))
-		{
-			if (enabledExtensionCount < maxEnabledExtensions)
-			{
-				enabledExtensionNames[enabledExtensionCount++] = extensionName;
-				TBXR_SetOptionalExtensionFlag(extensionName);
-			}
-		}
+		TBXR_AddExtensionIfAvailable(
+				supportedExtensions, supportedExtensionCount,
+				XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME,
+				enabledExtensionNames, &enabledExtensionCount, maxEnabledExtensions);
+		TBXR_AddExtensionIfAvailable(
+				supportedExtensions, supportedExtensionCount,
+				XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME,
+				enabledExtensionNames, &enabledExtensionCount, maxEnabledExtensions);
+		TBXR_AddExtensionIfAvailable(
+				supportedExtensions, supportedExtensionCount,
+				XR_FB_COLOR_SPACE_EXTENSION_NAME,
+				enabledExtensionNames, &enabledExtensionCount, maxEnabledExtensions);
 	}
 
 	free(supportedExtensions);
@@ -1666,25 +1783,6 @@ void TBXR_InitRenderer(  ) {
         gAppState.Projections[eye].type = XR_TYPE_VIEW;
 	}
 
-	if (openXrExtPicoConfigs && TBXR_StringContainsNoCase(gAppState.OpenXRHMD, "pico"))
-    {
-        XrResult setConfigResult = xrGetInstanceProcAddr(
-				gAppState.Instance, "xrSetConfigPICO", (PFN_xrVoidFunction*)(&pfnXrSetConfigPICO));
-        XrResult getConfigResult = xrGetInstanceProcAddr(
-				gAppState.Instance, "xrGetConfigPICO", (PFN_xrVoidFunction*)(&pfnXrGetConfigPICO));
-
-		if (XR_SUCCEEDED(setConfigResult) && pfnXrSetConfigPICO != NULL)
-		{
-			pfnXrSetConfigPICO(gAppState.Session,TRACKING_ORIGIN,"0");
-			pfnXrSetConfigPICO(gAppState.Session,TRACKING_ORIGIN,"1");
-		}
-
-		if (XR_SUCCEEDED(getConfigResult) && pfnXrGetConfigPICO != NULL)
-		{
-			pfnXrGetConfigPICO(gAppState.Session, GET_DISPLAY_RATE, &gAppState.currentDisplayRefreshRate);
-		}
-    }
-
 	ovrRenderer_Create(
 			gAppState.Session,
 			&gAppState.Renderer,
@@ -1710,10 +1808,8 @@ void TBXR_InitialiseOpenXR()
 	const char* openXRHMD = getenv("OPENXR_HMD");
 	gAppState.OpenXRHMD = openXRHMD != NULL ? (char*)openXRHMD : (char*)"";
 
+	TBXR_LoadOpenXRLoader();
 
-	PFN_xrInitializeLoaderKHR xrInitializeLoaderKHR;
-	xrGetInstanceProcAddr(
-			XR_NULL_HANDLE, "xrInitializeLoaderKHR", (PFN_xrVoidFunction*)&xrInitializeLoaderKHR);
 	if (xrInitializeLoaderKHR != NULL) {
 		XrLoaderInitInfoAndroidKHR loaderInitializeInfoAndroid;
 		memset(&loaderInitializeInfoAndroid, 0, sizeof(loaderInitializeInfoAndroid));
@@ -1737,7 +1833,7 @@ void TBXR_InitialiseOpenXR()
 	appInfo.applicationVersion = 0;
 	strcpy(appInfo.engineName, "QuestZDoom");
 	appInfo.engineVersion = 0;
-	appInfo.apiVersion = XR_MAKE_VERSION(1, 0, 0);
+	appInfo.apiVersion = XR_CURRENT_API_VERSION;
 
 	XrInstanceCreateInfo instanceCreateInfo;
 	memset(&instanceCreateInfo, 0, sizeof(instanceCreateInfo));
@@ -1760,11 +1856,12 @@ void TBXR_InitialiseOpenXR()
 	instanceCreateInfo.enabledExtensionNames = enabledExtensionNames;
 
 	XrResult initResult;
-	OXR(initResult = xrCreateInstance(&instanceCreateInfo, &gAppState.Instance));
+	initResult = xrCreateInstance(&instanceCreateInfo, &gAppState.Instance);
 	if (initResult != XR_SUCCESS) {
 		ALOGE("Failed to create XR instance: %d.", initResult);
 		exit(1);
 	}
+	TBXR_LoadOpenXRInstanceFunctions(gAppState.Instance);
 
 	XrInstanceProperties instanceInfo;
 	instanceInfo.type = XR_TYPE_INSTANCE_PROPERTIES;
@@ -1777,18 +1874,15 @@ void TBXR_InitialiseOpenXR()
 			XR_VERSION_MINOR(instanceInfo.runtimeVersion),
 			XR_VERSION_PATCH(instanceInfo.runtimeVersion));
 
-	if (gAppState.OpenXRHMD[0] == '\0')
+	if (TBXR_StringContainsNoCase(instanceInfo.runtimeName, "pico"))
 	{
-		if (TBXR_StringContainsNoCase(instanceInfo.runtimeName, "pico"))
-		{
-			gAppState.OpenXRHMD = (char*)"pico";
-		}
-		else if (TBXR_StringContainsNoCase(instanceInfo.runtimeName, "meta") ||
-				 TBXR_StringContainsNoCase(instanceInfo.runtimeName, "oculus") ||
-				 TBXR_StringContainsNoCase(instanceInfo.runtimeName, "quest"))
-		{
-			gAppState.OpenXRHMD = (char*)"meta";
-		}
+		gAppState.OpenXRHMD = (char*)"pico";
+	}
+	else if (TBXR_StringContainsNoCase(instanceInfo.runtimeName, "meta") ||
+			 TBXR_StringContainsNoCase(instanceInfo.runtimeName, "oculus") ||
+			 TBXR_StringContainsNoCase(instanceInfo.runtimeName, "quest"))
+	{
+		gAppState.OpenXRHMD = (char*)"meta";
 	}
 	ALOGV("OpenXR HMD profile: %s", gAppState.OpenXRHMD[0] != '\0' ? gAppState.OpenXRHMD : "generic");
 

@@ -51,6 +51,11 @@ import java.util.Locale;
 		try
 		{
 			System.loadLibrary("openxr_loader");
+		} catch (Throwable e)
+		{}
+
+		try
+		{
 			setenv("OPENXR_HMD", manufacturer, true);
 		} catch (Exception e)
 		{}

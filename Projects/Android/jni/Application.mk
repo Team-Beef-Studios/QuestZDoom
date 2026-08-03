@@ -13,7 +13,7 @@ APP_ALLOW_MISSING_DEPS=true
 
 APP_SHORT_COMMANDS :=true
 
-APP_MODULES := qzdoom openxr_loader
+APP_MODULES := qzdoom
 APP_STL := c++_shared
 
 

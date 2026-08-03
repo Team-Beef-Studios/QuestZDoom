@@ -1,5 +1,6 @@
-QuestZDoom uses the generic Khronos OpenXR loader from:
+OpenXR loader binaries are supplied by the Gradle dependency:
 
-Projects/AndroidPrebuilt/jni/libopenxr_loader.so
+org.khronos.openxr:openxr_loader_for_android
 
-Do not add per-HMD proprietary loader binaries here.
+Gradle extracts the generic arm64-v8a loader from that AAR into build/generated/openxr-loader/jniLibs
+before packaging. Do not copy headset-specific libopenxr_loader*.so files into this folder.
